@@ -65,6 +65,58 @@ const getChannelStats = asyncHandler(async (req, res) => {
 
 const getChannelVideos = asyncHandler(async (req, res) => {
   // TODO: Get all the videos uploaded by the channel
+  const channelId = req.user?._id;
+  const { page = 1, limit = 10 } = req.query; // page and limit for pagination
+
+  if (!channelId) {
+    throw new ApiError(400, "Channel ID is required");
+  }
+  const getallvideos = Video.aggregate([
+    {
+      $match: {
+        owner: new mongoose.Types.ObjectId(channelId),
+      },
+    },
+    {
+      $sort: {
+        createdAt: -1,
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "owner",
+        foreignField: "_id",
+        as: "ownerInfo",
+      },
+    },
+    {
+      $unwind: "$ownerInfo",
+      preserveNullAndEmptyArrays: true,
+    },
+    {
+      $project: {
+        videoFile: 1,
+        title: 1,
+        description: 1,
+        thumbnail: 1,
+        duration: 1,
+        views: 1,
+        createdAt: 1,
+        isPublished: 1,
+        ownerInfo: 1,
+        ownerInfo: 1,
+      },
+    },
+  ]);
+  const options = {
+    page: parseInt(page),
+    limit: parseInt(limit),
+  };
+  const videos = await Video.aggregatePaginate(getallvideos, options);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, videos, "channel videos feteched"));
 });
 
 export { getChannelStats, getChannelVideos };
