@@ -95,14 +95,106 @@ const getVideoComments = asyncHandler(async (req, res) => {
 
 const addComment = asyncHandler(async (req, res) => {
   // TODO: add a comment to a video
+
+  const videoId = req.params.videoId;
+
+  const { content } = req.body;
+
+  if (!content) {
+    throw new ApiError(400, "Content is required");
+  }
+
+  const comment = await Comment.create({
+    content: content.trim(),
+    video: videoId,
+    owner: req.user._id,
+  });
+
+  if (!comment) {
+    throw new ApiError(500, "Failed to add comment");
+  }
+
+  res
+    .status(201)
+    .json(new ApiResponse(201, comment, "Comment added successfully"));
 });
 
 const updateComment = asyncHandler(async (req, res) => {
   // TODO: update a comment
+  const commentId = req.params.commentId;
+  const { newContent } = req.body;
+
+  if (!newContent) {
+    throw new ApiError(400, "Content is required");
+  }
+
+  const comment = await Comment.findByIdAndUpdate(
+    commentId,
+    {
+      content: content.trim(),
+    },
+    {
+      new: true,
+    }
+  );
+
+  if (!comment) {
+    throw new ApiError(404, "Comment not found");
+  }
+
+  if (comment?.owner.toString() !== req.user?._id.toString()) {
+    throw new ApiError(403, "You are not authorized to update this comment");
+  }
+
+  //don't need to check if user exists or not ;as it is done by the middleware
+
+  const Updatedcomment = await Comment.findByIdAndUpdate(
+    commentId,
+    {
+      content: newContent,
+    },
+    { new: true }
+  );
+
+  if (!Updatedcomment) {
+    throw new ApiError(500, "Error while updating comment, Please try again");
+  }
+
+  res
+    .status(200)
+    .json(new ApiResponse(200, Updatedcomment, "Comment updated successfully"));
 });
 
 const deleteComment = asyncHandler(async (req, res) => {
   // TODO: delete a comment
+  const commentId = req.params.commentId;
+
+  if (!mongoose.isValidObjectId(commentId) || !commentId) {
+    throw new ApiError(400, "Invalid comment id");
+  }
+
+  const comment = await Comment.findByIdAndDelete(commentId);
+
+  if (!comment) {
+    throw new ApiError(404, "Comment not found");
+  }
+
+  if (comment?.owner.toString() !== req.user?._id.toString()) {
+    throw new ApiError(403, "You are not authorized to delete this comment");
+  }
+
+  const deletedComment = await Comment.findOneAndDelete({
+    _id: commentId,
+    owner: req.user?._id,
+  });
+
+  if (!deletedComment) {
+    throw new ApiError(500, "Error while deleting comment, Please try again");
+  }
+
+  res
+    .status(200)
+    .json(new ApiResponse(200, deletedComment, "Comment deleted successfully"));
 });
 
 export { getVideoComments, addComment, updateComment, deleteComment };
