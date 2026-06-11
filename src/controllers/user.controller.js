@@ -262,24 +262,36 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 const updateAccountDetails = asyncHandler(async (req, res) => {
   const { fullName, email } = req.body;
 
-  if (!fullName || !email) {
-    throw new ApiError(400, "All fields are required");
+  if (!fullName && !email) {
+    throw new ApiError(400, "Any One feild(email or fullName) is required.");
   }
 
-  const user = await User.findByIdAndUpdate(
-    req.user?._id,
-    {
-      $set: {
-        fullName: fullName,
-        email: email,
+  const existingemail = await User.findOne({ email: email });
+  if (
+    existingemail &&
+    existingemail._id.toString() !== req.user?._id.toString()
+  ) {
+    throw new ApiError(409, "User with this email already exists.");
+  }
+  if (email) {
+    const user = await User.findByIdAndUpdate(
+      req.user?._id,
+      {
+        $set: {
+          fullName: fullName || req.user.fullName,
+          email: email || req.user.email,
+        },
       },
-    },
-    { new: true }
-  ).select("-password");
-
+      { new: true }
+    ).select("-password");
+    if (!user) {
+      throw new ApiError(500, "Failed to update account details");
+    }
+    req.user = user;
+  }
   return res
     .status(200)
-    .json(new ApiResponse(200, user, "Account details updated successfully"));
+    .json(new ApiResponse(200, {}, "Account details updated successfully"));
 });
 
 const updateUserAvatar = asyncHandler(async (req, res) => {
