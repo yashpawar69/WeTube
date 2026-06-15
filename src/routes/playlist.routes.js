@@ -9,22 +9,29 @@ import {
   updatePlaylist,
 } from "../controllers/playlist.controller.js";
 import { verifyJWT } from "../middlewears/auth.middleware.js";
+import { checkValidObjectId } from "../middlewears/ValidateObjectId.middleware.js";
 
 const router = Router();
 
 router.use(verifyJWT); // Apply verifyJWT middleware to all routes in this file
 
 router.route("/").post(createPlaylist);
-
+router
+  .route("/user/:userId")
+  .get(checkValidObjectId(["userId"]), getUserPlaylists);
 router
   .route("/:playlistId")
-  .get(getPlaylistById)
-  .patch(updatePlaylist)
-  .delete(deletePlaylist);
-
-router.route("/add/:videoId/:playlistId").patch(addVideoToPlaylist);
-router.route("/remove/:videoId/:playlistId").patch(removeVideoFromPlaylist);
-
-router.route("/user/:userId").get(getUserPlaylists);
+  .get(checkValidObjectId(["playlistId"]), getPlaylistById)
+  .patch(checkValidObjectId(["playlistId"]), updatePlaylist)
+  .delete(checkValidObjectId(["playlistId"]), deletePlaylist);
+router
+  .route("/add/:videoId/:playlistId")
+  .patch(checkValidObjectId(["videoId", "playlistId"]), addVideoToPlaylist);
+router
+  .route("/remove/:videoId/:playlistId")
+  .patch(
+    checkValidObjectId(["videoId", "playlistId"]),
+    removeVideoFromPlaylist
+  );
 
 export default router;
