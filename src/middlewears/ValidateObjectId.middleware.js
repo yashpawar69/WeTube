@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { ApiError } from "../utils/ApiError";
+import { ApiError } from "../utils/ApiError.js";
 
 const checkValidObjectId = (givenObjectId) => async (req, res, next) => {
   const isValid = givenObjectId.find(

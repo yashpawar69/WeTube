@@ -1,153 +1,78 @@
-import mongoose, { isValidObjectId } from "mongoose";
+import mongoose from "mongoose";
 import { Tweet } from "../models/tweet.model.js";
-import { User } from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
+// 1. Create Tweet
 const createTweet = asyncHandler(async (req, res) => {
-  //TODO: create tweet
-  const { userId } = req.user?._id;
   const { content } = req.body;
+  if (!content?.trim()) throw new ApiError(400, "Content is required");
 
-  if (!content || content.trim() === "") {
-    throw new ApiError(400, "Content is required");
-  }
-  const newTweet = Tweet.create({
-    owner: userId,
+  const tweet = await Tweet.create({
     content: content.trim(),
+    owner: req.user?._id,
   });
-  if (!newTweet) {
-    throw new ApiError(500, "Failed to create tweet");
-  }
-  const populateDoc = await newTweet.populate(
-    "owner",
-    "username",
-    "avatar",
-    "fullname"
-  );
-
   return res
     .status(201)
-    .json(new ApiResponse(201, populateDoc, "Tweet created successfully"));
+    .json(new ApiResponse(201, tweet, "Tweet created successfully"));
 });
 
+// 2. Get User Tweets (FIXED 500 error aggregation cast issue)
 const getUserTweets = asyncHandler(async (req, res) => {
-  // TODO: get user tweets
   const { userId } = req.params;
-  const { page = 1, limit = 10 } = req.query;
+  if (!mongoose.isValidObjectId(userId))
+    throw new ApiError(400, "Invalid User ID format");
 
-  const fetchUserTweets = await Tweet.aggregate([
-    {
-      $match: {
-        owner: new Types.ObjectId(userId),
-      },
-    },
+  const tweets = await Tweet.aggregate([
+    { $match: { owner: new mongoose.Types.ObjectId(userId) } }, // Fixed casting crash
     {
       $lookup: {
         from: "users",
         localField: "owner",
         foreignField: "_id",
         as: "owner",
-        pipeline: [
-          {
-            $project: {
-              username: 1,
-              avatar: 1,
-              fullname: 1,
-            },
-          },
-        ],
+        pipeline: [{ $project: { username: 1, fullName: 1, avatar: 1 } }],
       },
     },
-    {
-      $addFields: {
-        owner: { $first: "$owner" },
-      },
-    },
-    {
-      $sort: {
-        createdAt: -1,
-      },
-    },
+    { $addFields: { owner: { $arrayElemAt: ["$owner", 0] } } },
   ]);
 
-  const options = {
-    page: parseInt(page),
-    limit: parseInt(limit),
-    sort: { createdAt: -1 },
-  };
-
-  const tweetPage = await Tweet.aggregatePaginate(fetchUserTweets, options);
-
-  if (!tweetPage) {
-    throw new ApiError(500, "Failed to fetch tweets");
-  }
-
   return res
     .status(200)
-    .json(new ApiResponse(200, tweetPage, "User tweets fetched successfully"));
+    .json(new ApiResponse(200, tweets, "Tweets fetched successfully"));
 });
 
+// 3. Update Tweet
 const updateTweet = asyncHandler(async (req, res) => {
-  //TODO: update tweet
-  const { userId } = req.user?._id;
   const { tweetId } = req.params;
   const { content } = req.body;
+  if (!content?.trim()) throw new ApiError(400, "Content cannot be empty");
 
-  if (!content || content.trim() === "") {
-    throw new ApiError(400, "Content is required");
-  }
-
-  const updatedTweet = await Tweet.findByIdAndUpdate(
-    {
-      _id: new Types.ObjectId(tweetId),
-      owner: new Types.ObjectId(userId),
-    },
-    {
-      $set: {
-        content: content.trim(),
-      },
-    },
-    {
-      new: true,
-    }
+  const tweet = await Tweet.findOneAndUpdate(
+    { _id: tweetId, owner: req.user?._id },
+    { $set: { content: content.trim() } },
+    { new: true }
   );
-
-  if (!updatedTweet) {
-    throw new ApiError(500, "Failed to update tweet");
-  }
-
-  const populateDoc = await updatedTweet.populate(
-    "owner",
-    "username",
-    "avatar",
-    "fullname"
-  );
+  if (!tweet) throw new ApiError(404, "Tweet not found or unauthorized");
 
   return res
     .status(200)
-    .json(new ApiResponse(200, populateDoc, "Tweet updated successfully"));
+    .json(new ApiResponse(200, tweet, "Tweet updated successfully"));
 });
 
+// 4. Delete Tweet
 const deleteTweet = asyncHandler(async (req, res) => {
-  //TODO: delete tweet
-  const { userId } = req.user?._id;
   const { tweetId } = req.params;
-
-  if (!Types.ObjectId.isValid(tweetId)) {
-    throw new ApiError(404, "Invalid id");
-  }
-  const deletedTweet = await Tweet.findByIdAndDelete({
+  const tweet = await Tweet.findOneAndDelete({
     _id: tweetId,
-    owner: userId,
+    owner: req.user?._id,
   });
-  if (!deletedTweet) {
-    throw new ApiError(400, "tweet was not deleted");
-  }
+  if (!tweet) throw new ApiError(404, "Tweet not found or unauthorized");
+
   return res
     .status(200)
-    .json(new ApiResponse(200, deletedTweet, "Tweet updated successfully"));
+    .json(new ApiResponse(200, {}, "Tweet deleted successfully"));
 });
 
 export { createTweet, getUserTweets, updateTweet, deleteTweet };

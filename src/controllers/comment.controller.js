@@ -6,47 +6,26 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 
 const getVideoComments = asyncHandler(async (req, res) => {
-  //TODO: get all comments for a video
   const { videoId } = req.params;
-  if (!mongoose.isValidObjectId(videoId) || !videoId) {
-    throw new ApiError(400, "Invalid video id");
+  const { page = 1, limit = 10 } = req.query;
+
+  if (!mongoose.isValidObjectId(videoId)) {
+    throw new ApiError(400, "Invalid Video ID format");
   }
-  const comments = Comment.mongoose.aggregate([
+
+  // DYNAMIC BYPASS: Agar standard import undefined ho raha hai,
+  // toh direct registered mongoose model instance uthao!
+  const CommentModel = mongoose.models.Comment || mongoose.model("Comment");
+
+  if (!CommentModel) {
+    throw new ApiError(500, "Comment model registry could not be loaded");
+  }
+
+  // Ab standard aggregation direct bypass component par chalegi
+  const commentAggregate = CommentModel.aggregate([
     {
       $match: {
-        video: new Types.ObjectId(videoId),
-      },
-    },
-    {
-      $lookup: {
-        from: "videos",
-        localField: "video",
-        foreignField: "_id",
-        as: "videoDetails",
-        pipeline: [
-          {
-            $lookup: {
-              from: "users",
-              localField: "owner",
-              foreignField: "_id",
-              as: "ownerDetails",
-              pipeline: [
-                {
-                  $project: {
-                    username: 1,
-                    fullName: 1,
-                    avatar: 1,
-                  },
-                },
-              ],
-            },
-          },
-          {
-            $addFields: {
-              ownerDetails: { $first: "$ownerDetails" },
-            },
-          },
-        ],
+        video: new mongoose.Types.ObjectId(videoId),
       },
     },
     {
@@ -54,43 +33,47 @@ const getVideoComments = asyncHandler(async (req, res) => {
         from: "users",
         localField: "owner",
         foreignField: "_id",
-        as: "ownerDetails",
+        as: "owner",
         pipeline: [
           {
-            $lookup: {
-              from: "users",
-              localField: "owner",
-              foreignField: "_id",
-              as: "watchHistoryDetails",
-            },
-          },
-          {
-            $addFields: {
-              watchHistoryDetails: { $first: "$watchHistoryDetails" },
+            $project: {
+              username: 1,
+              fullName: 1,
+              avatar: 1,
             },
           },
         ],
       },
     },
+    {
+      $addFields: {
+        owner: { $arrayElemAt: ["$owner", 0] },
+      },
+    },
+    {
+      $sort: {
+        createdAt: -1,
+      },
+    },
   ]);
 
-  const { page = 1, limit = 10 } = req.query;
-
   const options = {
-    page: parseInt(page),
-    limit: parseInt(limit),
-    sort: { createdAt: -1 },
+    page: parseInt(page, 10) || 1,
+    limit: parseInt(limit, 10) || 10,
   };
 
-  const result = awaitComment.aggregatePipeline(comments, options);
+  const comments = await CommentModel.aggregatePaginate(
+    commentAggregate,
+    options
+  );
 
-  if (!result) {
+  if (!comments) {
     throw new ApiError(404, "Comments not found");
   }
 
-  res
+  return res
     .status(200)
-    .json(new ApiResponse(200, result, "Comments fetched successfully"));
+    .json(new ApiResponse(200, comments, "Comments fetched successfully"));
 });
 
 const addComment = asyncHandler(async (req, res) => {

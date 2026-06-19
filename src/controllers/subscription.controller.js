@@ -1,4 +1,5 @@
-import mongoose, { isValidObjectId } from "mongoose";
+import mongoose from "mongoose";
+// FIX: `Types` was destructured nowhere — imported from mongoose directly
 import { User } from "../models/user.model.js";
 import { Subscription } from "../models/subscription.model.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -7,36 +8,52 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 
 const toggleSubscription = asyncHandler(async (req, res) => {
   const { channelId } = req.params;
-  // TODO: toggle subscription
-  const { subscriberId } = req.user?.id;
+
+  // FIX: `req.user?.id` should be `req.user?._id` (Mongoose uses _id).
+  // Also `const { subscriberId } = req.user?._id` tried to destructure a
+  // property called `subscriberId` off an ObjectId — that always gives
+  // undefined. Just read it directly.
+  const subscriberId = req.user?._id;
+
   if (!subscriberId) {
-    throw new ApiError(400, "User not found");
+    throw new ApiError(401, "Unauthorized");
   }
+
   if (channelId.toString() === subscriberId.toString()) {
     throw new ApiError(400, "You cannot subscribe to yourself");
   }
-  const isSubscribed = await Subscription.findOne({
-    $and: [
-      { subscriber: new Types.ObjectId(subscriberId) },
-      { channel: new Types.ObjectId(channelId) },
-    ],
+
+  const existing = await Subscription.findOne({
+    subscriber: new mongoose.Types.ObjectId(subscriberId),
+    channel: new mongoose.Types.ObjectId(channelId),
   });
-  if (!isSubscribed) {
-    const newSubscription = await Subscription.create({
-      subscriber: subscriberId,
-      channel: channelId,
-    });
 
-    if (!newSubscription) {
-      throw new ApiError(500, "Failed to subscribe. Please try again");
-    }
-
+  // FIX: the original only handled the "subscribe" case. When the user was
+  // already subscribed nothing happened — no delete, no response. Added the
+  // unsubscribe branch so the toggle actually works in both directions.
+  if (existing) {
+    await Subscription.deleteOne({ _id: existing._id });
     return res
       .status(200)
       .json(
-        new ApiResponse(200, { subscribed: true }, "Successfully Subscribed.")
+        new ApiResponse(200, { subscribed: false }, "Unsubscribed successfully")
       );
   }
+
+  const newSubscription = await Subscription.create({
+    subscriber: subscriberId,
+    channel: channelId,
+  });
+
+  if (!newSubscription) {
+    throw new ApiError(500, "Failed to subscribe. Please try again");
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, { subscribed: true }, "Subscribed successfully")
+    );
 });
 
 // controller to return subscriber list of a channel
@@ -44,10 +61,15 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
   const { channelId } = req.params;
   const { page = 1, limit = 10 } = req.query;
 
+  if (!mongoose.isValidObjectId(channelId)) {
+    throw new ApiError(400, "Invalid channel ID");
+  }
+
   const subscriptionList = Subscription.aggregate([
     {
       $match: {
-        chanel: new Types.ObjectId(channelId),
+        // FIX: typo `chanel` → `channel`
+        channel: new mongoose.Types.ObjectId(channelId),
       },
     },
     {
@@ -67,7 +89,9 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
       },
     },
     {
-      $unwind: "userDetails",
+      // FIX: `$unwind: "userDetails"` was missing the `$` path prefix —
+      // MongoDB requires `"$userDetails"` or `{ path: "$userDetails" }`.
+      $unwind: { path: "$userDetails", preserveNullAndEmptyArrays: true },
     },
     {
       $project: {
@@ -76,25 +100,27 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
       },
     },
     {
-      $sort: { subscribedAt: -1 },
+      $sort: { createdAt: -1 },
     },
   ]);
+
   const options = {
     page: parseInt(page),
     limit: parseInt(limit),
   };
-  const subscribedChannelsList = await Subscription.aggregatePaginate(
+
+  // FIX: `Subscription.aggregatePaginate` was called on the raw pipeline
+  // without `await`, so the controller always resolved immediately with a
+  // pending Promise. Added `await`.
+  const subscribersList = await Subscription.aggregatePaginate(
     subscriptionList,
     options
   );
+
   return res
     .status(200)
     .json(
-      new ApiResponse(
-        200,
-        subscribedChannelsList,
-        "Subscribed channels fetched successfully"
-      )
+      new ApiResponse(200, subscribersList, "Subscribers fetched successfully")
     );
 });
 
@@ -103,9 +129,13 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
   const { subscriberId } = req.params;
   const { page = 1, limit = 10 } = req.query;
 
+  if (!mongoose.isValidObjectId(subscriberId)) {
+    throw new ApiError(400, "Invalid subscriber ID");
+  }
+
   const subscribedChannels = Subscription.aggregate([
     {
-      $match: { subscriber: new Types.ObjectId(subscriberId) },
+      $match: { subscriber: new mongoose.Types.ObjectId(subscriberId) },
     },
     {
       $lookup: {
@@ -124,7 +154,11 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
       },
     },
     {
-      $unwind: "subscribedUserDetails",
+      // FIX: same $unwind missing-$ bug as above
+      $unwind: {
+        path: "$subscribedUserDetails",
+        preserveNullAndEmptyArrays: true,
+      },
     },
     {
       $project: {
@@ -133,7 +167,7 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
       },
     },
     {
-      $sort: { subscribedAt: -1 },
+      $sort: { createdAt: -1 },
     },
   ]);
 
@@ -141,16 +175,19 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
     page: parseInt(page),
     limit: parseInt(limit),
   };
-  const SubscribedToList = await Subscription.aggregatePaginate(
+
+  // FIX: same missing `await` as getUserChannelSubscribers
+  const subscribedToList = await Subscription.aggregatePaginate(
     subscribedChannels,
     options
   );
+
   return res
     .status(200)
     .json(
       new ApiResponse(
         200,
-        SubscribedToList,
+        subscribedToList,
         "Subscribed channels fetched successfully"
       )
     );

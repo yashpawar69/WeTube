@@ -142,7 +142,8 @@ const loginUser = asyncHandler(async (req, res) => {
 
   const options = {
     httpOnly: true,
-    secure: true,
+    secure: false,
+    sameSite: "lax",
   };
 
   return res
@@ -487,7 +488,9 @@ const getWatchHistory = asyncHandler(async (req, res) => {
       },
     },
   ]);
-
+  if (!user || user.length === 0) {
+    throw new ApiError(404, "User not found");
+  }
   return res
     .status(200)
     .json(
